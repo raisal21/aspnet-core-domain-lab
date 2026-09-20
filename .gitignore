@@ -1,0 +1,19 @@
+## Build output
+bin/
+obj/
+
+## IDE files
+.vs/
+.idea/
+*.user
+*.suo
+
+## Local tooling and generated files
+.vscode/
+TestResults/
+*.swp
+
+## Local secrets and environment overrides
+.env
+!.env.example
+appsettings.Local.json
