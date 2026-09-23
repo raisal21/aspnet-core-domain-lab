@@ -1,6 +1,6 @@
 # Peta 16 Bab ASP.NET Core
 
-File ini menjadi indeks belajar. Komentar inline dengan format `Bab N — ...` menandai titik implementasi utama di source code.
+File ini adalah indeks referensi dari 16 topik ke source code, bukan walkthrough kedua. Mulai dari `TOUR.md` untuk urutan belajar resmi dan checkpoint `predict -> run -> observe -> explain`. Gunakan `REVIEW-ASP.NET-CORE.md` untuk teori dan `CHEATSHEET-ASP.NET-CORE.md` untuk lookup cepat. Kembali ke file ini saat mencari lokasi implementasi; komentar inline dengan format `Bab N — ...` menandai titik utamanya.
 
 | Bab | Topik | Kode terkait | Penjelasan singkat |
 |---:|---|---|---|
@@ -21,6 +21,8 @@ File ini menjadi indeks belajar. Komentar inline dengan format `Bab N — ...` m
 | 15 | Rate Limiting | `Program.cs`, `[EnableRateLimiting]` pada controller | Fixed-window limiter dipartisi per user/IP untuk command industrial, dispatch logistics, dan transfer banking; rejection mengembalikan `429` dan `Retry-After`. |
 | 16 | API Documentation | `Program.cs`, `BearerSecurityOpenApiTransformer.cs`, Swagger UI, `README.md`, `AspNetCoreDomainLab.http` | Built-in OpenAPI menghasilkan document bertag per module dan security bearer hanya pada operation yang membutuhkan authorization; Swagger UI menyediakan eksplorasi interaktif. |
 
-## Cara membaca source
+## Cara memakai indeks
 
-Mulai dari `Program.cs` untuk melihat host dan pipeline, lanjut ke controller module, lalu service, model, dan `DomainDbContext`. Cari `Bab ` untuk berpindah langsung antar konsep. Migration generated tetap dianggap output EF Core; komentar pembelajaran ditempatkan pada context, konfigurasi, service, dan pipeline agar generated code tidak perlu diedit manual.
+Jika mengikuti lab dari awal, gunakan urutan dan request di `TOUR.md`. Jika sedang menelusuri satu konsep, mulai dari baris tabel yang sesuai, buka kode terkait, lalu cari `Bab N` untuk berpindah antar titik implementasi.
+
+Alur source utamanya tetap `Program.cs -> Controller -> Models -> Service -> DomainDbContext`. Migration generated dianggap output EF Core; komentar pembelajaran ditempatkan pada context, konfigurasi, service, dan pipeline agar generated code tidak perlu diedit manual.

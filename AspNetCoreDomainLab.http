@@ -1,16 +1,36 @@
-# Bab 6 — REST: request examples menunjukkan verb, route, body, bearer credential, dan expected workflow.
-# Bab 11 — replace token variables with JWT hasil login sebelum memanggil endpoint protected.
-# Bab 16 — file ini adalah executable companion untuk OpenAPI/Swagger-documented contract.
-@AspNetCoreDomainLab_HostAddress = http://localhost:5056
-@accessToken = paste-access-token-here
-@refreshToken = paste-refresh-token-here
+# Bab 6 — REST: requests show verbs, versioned routes, bodies, credentials, and expected outcomes.
+# Bab 11 — each domain uses its own synthetic user's token; wrong-role behavior is intentional.
+# Bab 16 — this file is the interactive companion to the OpenAPI/Swagger contract.
+#
+# Setup before running protected/resource requests:
+# 1. Change host to http://localhost:8080 when using Docker Compose.
+# 2. Change runId to a unique 1-16 character suffix for every walkthrough.
+# 3. Run the relevant login request.
+# 4. Copy accessToken/refreshToken into the matching variables below.
+# 5. Copy returned resource IDs into patientId, assetId, customerId, or accountId.
+#
+# The explicit copy steps keep this file portable across HTTP clients; response-handler syntax differs by editor.
+@host = http://localhost:5056
+@runId = change-me-001
+@healthcareToken = paste-healthcare-access-token-here
+@healthcareRefreshToken = paste-healthcare-refresh-token-here
+@industrialToken = paste-industrial-access-token-here
+@logisticsToken = paste-logistics-access-token-here
+@bankingToken = paste-banking-access-token-here
+@patientId = paste-patient-id-here
+@assetId = paste-asset-id-here
+@customerId = paste-customer-id-here
+@accountId = paste-account-id-here
 
-GET {{AspNetCoreDomainLab_HostAddress}}/openapi/v1.json
+### Host: OpenAPI is available in Development — expect 200
+GET {{host}}/openapi/v1.json
 Accept: application/json
 
-### Login with a synthetic healthcare user
+### Auth: no bearer token — expect 401
+GET {{host}}/api/v1/auth/me
 
-POST {{AspNetCoreDomainLab_HostAddress}}/api/v1/auth/login
+### Auth setup: login as healthcare.demo — expect 200; copy accessToken and refreshToken
+POST {{host}}/api/v1/auth/login
 Content-Type: application/json
 
 {
@@ -18,69 +38,168 @@ Content-Type: application/json
   "password": "HealthDemo!123"
 }
 
-### Inspect shared identity claims
+### Auth: inspect healthcare identity — expect 200
+GET {{host}}/api/v1/auth/me
+Authorization: Bearer {{healthcareToken}}
 
-GET {{AspNetCoreDomainLab_HostAddress}}/api/v1/auth/me
-Authorization: Bearer {{accessToken}}
+### Authorization: healthcare policy permits healthcare.demo — expect 200
+GET {{host}}/api/v1/auth/probes/healthcare
+Authorization: Bearer {{healthcareToken}}
 
-### Healthcare policy succeeds for healthcare.demo
+### Authorization: banking-transfer policy rejects healthcare.demo — expect 403
+GET {{host}}/api/v1/auth/probes/banking-transfer
+Authorization: Bearer {{healthcareToken}}
 
-GET {{AspNetCoreDomainLab_HostAddress}}/api/v1/auth/probes/healthcare
-Authorization: Bearer {{accessToken}}
+### Validation: required patient fields are absent — expect 400 validation_failed
+POST {{host}}/api/v1/healthcare/patients
+Authorization: Bearer {{healthcareToken}}
+Content-Type: application/json
 
-### Banking transfer policy rejects healthcare.demo
+{}
 
-GET {{AspNetCoreDomainLab_HostAddress}}/api/v1/auth/probes/banking-transfer
-Authorization: Bearer {{accessToken}}
-
-### Rotate a refresh token
-
-POST {{AspNetCoreDomainLab_HostAddress}}/api/v1/auth/refresh
+### Healthcare setup: create a unique synthetic patient — expect 201; copy id to patientId
+POST {{host}}/api/v1/healthcare/patients
+Authorization: Bearer {{healthcareToken}}
 Content-Type: application/json
 
 {
-  "refreshToken": "{{refreshToken}}"
-}
-
-### Revoke a refresh token for the current user
-
-POST {{AspNetCoreDomainLab_HostAddress}}/api/v1/auth/revoke
-Authorization: Bearer {{accessToken}}
-Content-Type: application/json
-
-{
-  "refreshToken": "{{refreshToken}}"
-}
-
-### Healthcare: create a synthetic patient
-
-POST {{AspNetCoreDomainLab_HostAddress}}/api/v1/healthcare/patients
-Authorization: Bearer {{accessToken}}
-Content-Type: application/json
-
-{
-  "medicalRecordNumber": "MRN-HTTP-001",
+  "medicalRecordNumber": "MRN-HTTP-{{runId}}",
   "displayName": "Synthetic Patient HTTP",
   "birthDate": "1988-05-10"
 }
 
-### Industrial: create a synthetic asset
-
-POST {{AspNetCoreDomainLab_HostAddress}}/api/v1/industrial/assets
-Authorization: Bearer {{accessToken}}
+### Domain conflict: repeat the same medical record number — expect 409 patient_already_exists
+POST {{host}}/api/v1/healthcare/patients
+Authorization: Bearer {{healthcareToken}}
 Content-Type: application/json
 
 {
-  "assetCode": "ASSET-HTTP-001",
+  "medicalRecordNumber": "MRN-HTTP-{{runId}}",
+  "displayName": "Duplicate Synthetic Patient",
+  "birthDate": "1988-05-10"
+}
+
+### Persistence: retrieve the created patient — expect 200
+GET {{host}}/api/v1/healthcare/patients/{{patientId}}
+Authorization: Bearer {{healthcareToken}}
+X-Correlation-Id: http-healthcare-{{runId}}
+
+### Domain invariant: an appointment cannot be in the past — expect 422
+POST {{host}}/api/v1/healthcare/patients/{{patientId}}/appointments
+Authorization: Bearer {{healthcareToken}}
+Content-Type: application/json
+
+{
+  "startsAtUtc": "2020-01-01T00:00:00Z",
+  "provider": "Synthetic Provider"
+}
+
+### Token lifecycle: rotate the healthcare refresh token — expect 200; replace both token variables
+POST {{host}}/api/v1/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{healthcareRefreshToken}}"
+}
+
+### Token lifecycle: revoke the current healthcare refresh token — expect 204
+POST {{host}}/api/v1/auth/revoke
+Authorization: Bearer {{healthcareToken}}
+Content-Type: application/json
+
+{
+  "refreshToken": "{{healthcareRefreshToken}}"
+}
+
+### Industrial setup: login — expect 200; copy accessToken to industrialToken
+POST {{host}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "userName": "industrial.demo",
+  "password": "IndustrialDemo!123"
+}
+
+### Industrial setup: create a unique synthetic asset — expect 201; copy id to assetId
+POST {{host}}/api/v1/industrial/assets
+Authorization: Bearer {{industrialToken}}
+Content-Type: application/json
+
+{
+  "assetCode": "ASSET-HTTP-{{runId}}",
   "displayName": "Synthetic Press HTTP"
 }
 
-### Logistics: retrieve a shipment
+### Industrial: record telemetry and invalidate application cache — expect 202
+POST {{host}}/api/v1/industrial/assets/{{assetId}}/telemetry
+Authorization: Bearer {{industrialToken}}
+Content-Type: application/json
 
-GET {{AspNetCoreDomainLab_HostAddress}}/api/v1/logistics/shipments/SYN-DEMO-001
-Authorization: Bearer {{accessToken}}
+{
+  "value": 42,
+  "unit": "percent"
+}
 
-### Banking: inspect synthetic transactions
+### Industrial: read telemetry with gzip accepted — expect 200 and Content-Encoding: gzip
+GET {{host}}/api/v1/industrial/assets/{{assetId}}/telemetry
+Authorization: Bearer {{industrialToken}}
+Accept-Encoding: gzip
 
-GET {{AspNetCoreDomainLab_HostAddress}}/api/v1/banking/accounts/{{accountId}}/transactions
-Authorization: Bearer {{accessToken}}
+### Logistics setup: login — expect 200; copy accessToken to logisticsToken
+POST {{host}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "userName": "logistics.demo",
+  "password": "LogisticsDemo!123"
+}
+
+### Logistics setup: create a unique shipment — expect 201
+POST {{host}}/api/v1/logistics/shipments
+Authorization: Bearer {{logisticsToken}}
+Content-Type: application/json
+
+{
+  "trackingNumber": "SHIP-HTTP-{{runId}}",
+  "origin": "Synthetic Origin",
+  "destination": "Synthetic Destination"
+}
+
+### Logistics: retrieve the created shipment — expect 200
+GET {{host}}/api/v1/logistics/shipments/SHIP-HTTP-{{runId}}
+Authorization: Bearer {{logisticsToken}}
+
+### Banking setup: login — expect 200; copy accessToken to bankingToken
+POST {{host}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "userName": "banking.demo",
+  "password": "BankingDemo!123"
+}
+
+### Banking setup: create a unique synthetic customer — expect 201; copy id to customerId
+POST {{host}}/api/v1/banking/customers
+Authorization: Bearer {{bankingToken}}
+Content-Type: application/json
+
+{
+  "customerReference": "CUSTOMER-HTTP-{{runId}}",
+  "displayName": "Synthetic Customer HTTP"
+}
+
+### Banking setup: create an account — expect 201; copy id to accountId
+POST {{host}}/api/v1/banking/customers/{{customerId}}/accounts
+Authorization: Bearer {{bankingToken}}
+Content-Type: application/json
+
+{
+  "accountReference": "ACCOUNT-HTTP-{{runId}}",
+  "currency": "SIM",
+  "initialBalanceMinor": 10000
+}
+
+### Banking: inspect synthetic transactions — expect 200 and an empty array before transfers
+GET {{host}}/api/v1/banking/accounts/{{accountId}}/transactions
+Authorization: Bearer {{bankingToken}}
+Accept-Encoding: gzip

@@ -1,25 +1,42 @@
 # Repo Tour: ASP.NET Core Domain Lab
 
-Tour ini adalah jalur membaca repo dari awal sampai akhir. Ikuti urutan ini supaya hubungan antara host, controller, service, database, dan request HTTP terlihat sebagai satu alur.
+Tour ini adalah **jalur belajar resmi** repository. Ikuti urutannya supaya host, controller, service, database, dan request HTTP terlihat sebagai satu alur. Gunakan `REVIEW-ASP.NET-CORE.md` saat konsep perlu penjelasan, `CHEATSHEET-ASP.NET-CORE.md` untuk lookup cepat, dan `CHAPTERS.md` untuk menemukan implementasi.
 
-> **Target akhir:** setelah selesai, Anda dapat menjelaskan satu request dari `curl` sampai PostgreSQL, lalu menghubungkannya dengan 16 bab ASP.NET Core.
+> **Target akhir:** setelah selesai, Anda dapat memprediksi perilaku satu request, menjalankannya, mengamati hasilnya, menjelaskan penyebabnya, dan menelusurinya dari `curl` sampai PostgreSQL.
 
-## 0. Prasyarat
+Setiap checkpoint memakai loop berikut:
 
-Gunakan satu terminal shell untuk mengikuti command agar variable seperti `BASE`, token, dan ID tetap tersedia.
+1. **Predict** — tulis status, body, header, log, atau perubahan state yang diharapkan.
+2. **Run** — jalankan command yang diberikan.
+3. **Observe** — bandingkan hasil aktual dengan prediksi.
+4. **Explain** — tunjukkan controller, middleware, policy, service, atau mapping yang menyebabkan hasil tersebut.
+
+Checkpoint mengukur pemahaman. Checklist implementasi di `TODO.md` hanya mencatat pekerjaan repository yang sudah dilakukan.
+
+## 0. Prasyarat dan state per run
+
+Gunakan satu terminal shell agar variable seperti `BASE`, token, dan ID tetap tersedia.
 
 Gunakan:
 
 - .NET SDK 10
 - Docker dan Docker Compose
 - `curl`
-- `jq` opsional, untuk membaca token/ID dari JSON
+- Python 3 untuk membaca token/ID dari JSON
 
-Masuk ke repo:
+Masuk ke repo dan siapkan variable:
 
 ```bash
 cd ~/workspace/aspnet-core-domain-lab
+BASE=http://localhost:8080
+RUN_ID="$(date -u +%s)-$$"
+
+json_value() {
+  python3 -c 'import json, sys; print(json.load(sys.stdin)[sys.argv[1]])' "$1"
+}
 ```
+
+`RUN_ID` membuat identifier unique tanpa menghapus volume PostgreSQL. Setiap run baru mendapat MRN, asset code, customer reference, dan account reference baru. Duplicate request dalam run yang sama tetap dapat dipakai untuk mempelajari `409 Conflict`.
 
 Jangan gunakan credential atau signing key development untuk production. Semua data domain di lab ini sintetis.
 
@@ -31,6 +48,7 @@ Baca file berikut dalam urutan ini:
 
 ```text
 README.md
+CHEATSHEET-ASP.NET-CORE.md
 CHAPTERS.md
 PLAN.md
 TODO.md
@@ -41,11 +59,14 @@ Modules/README.md
 ### Apa yang dicari
 
 1. **`README.md`** — tujuan lab, cara menjalankan API, credential sintetis, dan batasan non-production.
-2. **`CHAPTERS.md`** — indeks 16 bab dan lokasi kode setiap bab.
-3. **`PLAN.md`** — keputusan arsitektur: satu Web API, Controllers, satu `DomainDbContext`, schema PostgreSQL per bounded domain.
-4. **`TODO.md`** — checklist implementasi dan verifikasi. Semua item saat ini sudah selesai.
-5. **`HANDOFF.md`** — keputusan teknis, hasil validasi, dan dragons/risiko yang diketahui.
-6. **`Modules/README.md`** — batas healthcare, industrial, logistics, dan banking.
+2. **`CHEATSHEET-ASP.NET-CORE.md`** — lookup API, HTTP contract, command, dan diagnosis selama tour.
+3. **`CHAPTERS.md`** — indeks 16 bab dan lokasi kode setiap bab.
+4. **`PLAN.md`** — keputusan arsitektur: satu Web API, Controllers, satu `DomainDbContext`, schema PostgreSQL per bounded domain.
+5. **`TODO.md`** — catatan implementation baseline dan learning-quality batch; checkbox bukan bukti mastery.
+6. **`HANDOFF.md`** — state sesi dan verifikasi terakhir yang dapat menjadi basi; keputusan durable tetap berada di `PLAN.md`.
+7. **`Modules/README.md`** — batas healthcare, industrial, logistics, dan banking.
+
+`REVIEW-ASP.NET-CORE.md` tidak perlu dibaca sekali duduk. Buka bagian yang sesuai ketika checkpoint membutuhkan penjelasan lebih dalam.
 
 Cari semua komentar pembelajaran dengan:
 
@@ -100,12 +121,18 @@ Ikuti bagian ini dari atas ke bawah:
 Kirim request pertama:
 
 ```bash
-BASE=http://localhost:8080
 curl --fail --silent "$BASE/openapi/v1.json" | head -c 500
 printf '\n'
 curl --fail --silent --output /dev/null --write-out 'Swagger HTTP %{http_code}\n' \
   "$BASE/swagger/index.html"
 ```
+
+### Checkpoint — host dan environment
+
+- **Predict:** kedua request menghasilkan `200` hanya karena Compose memakai environment `Development`.
+- **Run:** jalankan request OpenAPI dan Swagger di atas.
+- **Observe:** OpenAPI berisi route `/api/v1`; Swagger mengembalikan `200`.
+- **Explain:** tunjukkan blok `if (app.Environment.IsDevelopment())` serta `MapOpenApi()`/`UseSwaggerUI()` di `Program.cs`.
 
 **Yang dipahami:** host tidak berisi aturan bisnis. Host menyusun dependency, pipeline, dan endpoint.
 
@@ -182,13 +209,7 @@ HEALTH_TOKEN=$(curl --fail --silent --request POST \
   --data '{
     "userName": "healthcare.demo",
     "password": "HealthDemo!123"
-  }' | jq -r '.accessToken')
-```
-
-Jika `jq` tidak tersedia, simpan nilai `accessToken` dari response dan set manual:
-
-```bash
-HEALTH_TOKEN='paste-access-token-here'
+  }' | json_value accessToken)
 ```
 
 Buat patient:
@@ -198,13 +219,13 @@ PATIENT_JSON=$(curl --fail --silent --request POST \
   "$BASE/api/v1/healthcare/patients" \
   --header "Authorization: Bearer $HEALTH_TOKEN" \
   --header 'Content-Type: application/json' \
-  --data '{
-    "medicalRecordNumber": "MRN-TOUR-001",
-    "displayName": "Synthetic Tour Patient",
-    "birthDate": "1988-05-10"
-  }')
+  --data "{
+    \"medicalRecordNumber\": \"MRN-TOUR-$RUN_ID\",
+    \"displayName\": \"Synthetic Tour Patient\",
+    \"birthDate\": \"1988-05-10\"
+  }")
 printf '%s\n' "$PATIENT_JSON"
-PATIENT_ID=$(printf '%s' "$PATIENT_JSON" | jq -r '.id')
+PATIENT_ID=$(printf '%s' "$PATIENT_JSON" | json_value id)
 ```
 
 Ambil patient:
@@ -233,10 +254,46 @@ curl --silent --request POST \
   "$BASE/api/v1/healthcare/patients" \
   --header "Authorization: Bearer $HEALTH_TOKEN" \
   --header 'Content-Type: application/json' \
-  --data '{}'
+  --data '{}' \
+  --write-out '\nHTTP %{http_code}\n'
 ```
 
-Perhatikan response `400` dengan `errorCode: validation_failed`. Coba domain rule dengan medical record number yang sama untuk melihat `409` dan error contract healthcare.
+Ulangi MRN yang sama untuk memicu domain conflict:
+
+```bash
+curl --silent --request POST \
+  "$BASE/api/v1/healthcare/patients" \
+  --header "Authorization: Bearer $HEALTH_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data "{
+    \"medicalRecordNumber\": \"MRN-TOUR-$RUN_ID\",
+    \"displayName\": \"Duplicate Synthetic Tour Patient\",
+    \"birthDate\": \"1988-05-10\"
+  }" \
+  --write-out '\nHTTP %{http_code}\n'
+```
+
+Coba domain invariant yang lolos model validation tetapi ditolak service:
+
+```bash
+curl --silent --request POST \
+  "$BASE/api/v1/healthcare/patients/$PATIENT_ID/appointments" \
+  --header "Authorization: Bearer $HEALTH_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "startsAtUtc": "2020-01-01T00:00:00Z",
+    "provider": "Synthetic Provider"
+  }' \
+  --write-out '\nHTTP %{http_code}\n'
+```
+
+### Checkpoint — validation, domain invariant, dan persistence
+
+- **Predict:** body kosong menghasilkan `400 validation_failed`, MRN duplikat menghasilkan `409 patient_already_exists`, dan appointment lampau menghasilkan `422 appointment_must_be_future`.
+- **Run:** jalankan create/read patient dan tiga failure request di atas.
+- **Observe:** patient `201` dapat dibaca kembali dengan `200`; ketiga failure memakai error contract healthcare.
+- **Explain:** DataAnnotations bekerja sebelum action, sedangkan duplicate MRN dan future-only appointment diperiksa di `HealthcareService`.
+- **Trace:** ikuti `HealthcareController -> HealthcareService -> DomainDbContext -> healthcare.patients`.
 
 ---
 
@@ -268,17 +325,25 @@ MapControllers
 Coba correlation ID:
 
 ```bash
+CORRELATION_ID="tour-$RUN_ID"
 curl --silent --include \
   "$BASE/api/v1/healthcare/patients/$PATIENT_ID" \
   --header "Authorization: Bearer $HEALTH_TOKEN" \
-  --header 'X-Correlation-Id: tour-correlation-001'
+  --header "X-Correlation-Id: $CORRELATION_ID"
 ```
 
-Cari header response `X-Correlation-Id` dan lihat log:
+Cari header response dan completion log dengan correlation ID yang sama:
 
 ```bash
-docker compose logs --since 2m --no-color api
+docker compose logs --since 2m --no-color api | grep "$CORRELATION_ID"
 ```
+
+### Checkpoint — middleware dan correlation logging
+
+- **Predict:** response mempertahankan `X-Correlation-Id`; log completion memuat method, path, status, elapsed time, dan correlation ID yang sama.
+- **Run:** kirim request dan baca log di atas.
+- **Observe:** satu ID menghubungkan client response dengan server log.
+- **Explain:** `RequestDiagnosticsMiddleware` memasang response header, structured scope, dan explicit correlation field sebelum memanggil middleware berikutnya.
 
 ### Bab 8 — Validation
 
@@ -328,32 +393,34 @@ Infrastructure/Authentication/DevelopmentDataSeeder.cs
 Controllers/AuthController.cs
 ```
 
-Login dan cek identity:
+Bandingkan tanpa identity, identity yang diizinkan, dan identity dengan role salah:
 
 ```bash
-curl --fail --silent --request POST \
-  "$BASE/api/v1/auth/login" \
-  --header 'Content-Type: application/json' \
-  --data '{
-    "userName": "healthcare.demo",
-    "password": "HealthDemo!123"
-  }'
+# Tanpa bearer token.
+curl --silent --write-out '\nHTTP %{http_code}\n' \
+  "$BASE/api/v1/auth/me"
 
-curl --fail --silent "$BASE/api/v1/auth/me" \
+# Token healthcare dapat membaca identity dan probe healthcare.
+curl --silent --write-out '\nHTTP %{http_code}\n' \
+  "$BASE/api/v1/auth/me" \
   --header "Authorization: Bearer $HEALTH_TOKEN"
-```
 
-Cek policy allow/deny:
-
-```bash
 curl --silent --write-out '\nHTTP %{http_code}\n' \
   "$BASE/api/v1/auth/probes/healthcare" \
   --header "Authorization: Bearer $HEALTH_TOKEN"
 
+# Token valid, tetapi tidak memiliki role banking.transfer.
 curl --silent --write-out '\nHTTP %{http_code}\n' \
   "$BASE/api/v1/auth/probes/banking-transfer" \
   --header "Authorization: Bearer $HEALTH_TOKEN"
 ```
+
+### Checkpoint — authentication versus authorization
+
+- **Predict:** tanpa token menghasilkan `401`; token healthcare menghasilkan `200` pada `/me` dan probe healthcare; token yang sama menghasilkan `403` pada probe banking-transfer.
+- **Run:** jalankan empat request di atas.
+- **Observe:** `401` berarti identity belum terbentuk; `403` berarti identity valid tetapi policy menolak role.
+- **Explain:** tunjukkan `UseAuthentication()`, `UseAuthorization()`, JWT bearer validation, dan `AuthPolicies.Configure`.
 
 Baca dan pahami:
 
@@ -406,6 +473,23 @@ docker compose exec -T postgres psql -U domainlab -d domainlab -c \
    order by table_schema;"
 ```
 
+Uji persistence melewati restart proses API:
+
+```bash
+docker compose restart api
+until curl --fail --silent "$BASE/openapi/v1.json" > /dev/null; do sleep 1; done
+curl --fail --silent \
+  "$BASE/api/v1/healthcare/patients/$PATIENT_ID" \
+  --header "Authorization: Bearer $HEALTH_TOKEN"
+```
+
+### Checkpoint — EF Core dan persistence
+
+- **Predict:** lima schema memiliki table; patient tetap dapat dibaca setelah API restart.
+- **Run:** periksa schema, restart API, lalu baca `PATIENT_ID` yang dibuat sebelumnya.
+- **Observe:** process memory hilang tetapi row PostgreSQL tetap ada.
+- **Explain:** tunjukkan connection string, persistent volume, migration startup, dan `ToTable(table, schema)` di `DomainDbContext`.
+
 **Yang dipahami:** satu database dan satu context tidak berarti semua module kehilangan ownership. Ownership dijaga oleh schema/table mapping.
 
 ---
@@ -448,17 +532,17 @@ INDUSTRIAL_TOKEN=$(curl --fail --silent --request POST \
   --data '{
     "userName": "industrial.demo",
     "password": "IndustrialDemo!123"
-  }' | jq -r '.accessToken')
+  }' | json_value accessToken)
 
 ASSET_JSON=$(curl --fail --silent --request POST \
   "$BASE/api/v1/industrial/assets" \
   --header "Authorization: Bearer $INDUSTRIAL_TOKEN" \
   --header 'Content-Type: application/json' \
-  --data '{
-    "assetCode": "TOUR-ASSET-001",
-    "displayName": "Synthetic Tour Asset"
-  }')
-ASSET_ID=$(printf '%s' "$ASSET_JSON" | jq -r '.id')
+  --data "{
+    \"assetCode\": \"TOUR-ASSET-$RUN_ID\",
+    \"displayName\": \"Synthetic Tour Asset\"
+  }")
+ASSET_ID=$(printf '%s' "$ASSET_JSON" | json_value id)
 
 curl --fail --silent --request POST \
   "$BASE/api/v1/industrial/assets/$ASSET_ID/telemetry" \
@@ -500,7 +584,7 @@ LOGISTICS_TOKEN=$(curl --fail --silent --request POST \
   --data '{
     "userName": "logistics.demo",
     "password": "LogisticsDemo!123"
-  }' | jq -r '.accessToken')
+  }' | json_value accessToken)
 ```
 
 ### 8.3 Banking
@@ -533,28 +617,28 @@ BANKING_TOKEN=$(curl --fail --silent --request POST \
   --data '{
     "userName": "banking.demo",
     "password": "BankingDemo!123"
-  }' | jq -r '.accessToken')
+  }' | json_value accessToken)
 
 CUSTOMER_JSON=$(curl --fail --silent --request POST \
   "$BASE/api/v1/banking/customers" \
   --header "Authorization: Bearer $BANKING_TOKEN" \
   --header 'Content-Type: application/json' \
-  --data '{
-    "customerReference": "TOUR-CUSTOMER-001",
-    "displayName": "Synthetic Tour Customer"
-  }')
-CUSTOMER_ID=$(printf '%s' "$CUSTOMER_JSON" | jq -r '.id')
+  --data "{
+    \"customerReference\": \"TOUR-CUSTOMER-$RUN_ID\",
+    \"displayName\": \"Synthetic Tour Customer\"
+  }")
+CUSTOMER_ID=$(printf '%s' "$CUSTOMER_JSON" | json_value id)
 
 ACCOUNT_JSON=$(curl --fail --silent --request POST \
   "$BASE/api/v1/banking/customers/$CUSTOMER_ID/accounts" \
   --header "Authorization: Bearer $BANKING_TOKEN" \
   --header 'Content-Type: application/json' \
-  --data '{
-    "accountReference": "TOUR-ACCOUNT-001",
-    "currency": "SIM",
-    "initialBalanceMinor": 10000
-  }')
-ACCOUNT_ID=$(printf '%s' "$ACCOUNT_JSON" | jq -r '.id')
+  --data "{
+    \"accountReference\": \"TOUR-ACCOUNT-$RUN_ID\",
+    \"currency\": \"SIM\",
+    \"initialBalanceMinor\": 10000
+  }")
+ACCOUNT_ID=$(printf '%s' "$ACCOUNT_JSON" | json_value id)
 ```
 
 ### 8.4 Healthcare lanjutan
@@ -592,17 +676,37 @@ Pahami dua level cache:
 1. **Service/application cache** — dikontrol langsung oleh service dengan key, TTL, dan invalidation.
 2. **Output cache** — dipasang sebagai endpoint policy melalui `[OutputCache]` dan `UseOutputCache()`.
 
-Lihat cache hit/miss:
+Lihat application-cache miss, hit, lalu invalidation. Query marker berbeda memastikan request mencapai service, sedangkan service tetap memakai cache key asset yang sama.
 
 ```bash
-# Jalankan dua kali endpoint logistics yang sama.
-curl --silent "$BASE/api/v1/logistics/shipments/SYN-DEMO-002" \
-  --header "Authorization: Bearer $LOGISTICS_TOKEN" > /dev/null
-curl --silent "$BASE/api/v1/logistics/shipments/SYN-DEMO-002" \
-  --header "Authorization: Bearer $LOGISTICS_TOKEN" > /dev/null
+curl --fail --silent \
+  "$BASE/api/v1/industrial/assets/$ASSET_ID/telemetry?tour=miss" \
+  --header "Authorization: Bearer $INDUSTRIAL_TOKEN" > /dev/null
+curl --fail --silent \
+  "$BASE/api/v1/industrial/assets/$ASSET_ID/telemetry?tour=hit" \
+  --header "Authorization: Bearer $INDUSTRIAL_TOKEN" > /dev/null
 
-docker compose logs --since 1m --no-color api | grep 'Memory cache'
+# Mutation menghapus cache key telemetry asset.
+curl --fail --silent --request POST \
+  "$BASE/api/v1/industrial/assets/$ASSET_ID/telemetry" \
+  --header "Authorization: Bearer $INDUSTRIAL_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{"value":43,"unit":"percent"}' > /dev/null
+
+curl --fail --silent \
+  "$BASE/api/v1/industrial/assets/$ASSET_ID/telemetry?tour=after-invalidation" \
+  --header "Authorization: Bearer $INDUSTRIAL_TOKEN" > /dev/null
+
+docker compose logs --since 2m --no-color api | \
+  grep "industrial:telemetry:$ASSET_ID"
 ```
+
+### Checkpoint — application cache
+
+- **Predict:** read pertama log `miss`, read kedua log `hit`, mutation log `Removed`, dan read terakhir log `miss` lagi.
+- **Run:** jalankan rangkaian di atas dalam waktu kurang dari TTL tiga detik.
+- **Observe:** gunakan log event, bukan perbandingan timing, sebagai bukti cache behavior.
+- **Explain:** tunjukkan `TelemetryCacheKey`, `TryGet`, `Set`, dan `Remove` di service/cache abstraction. Output cache adalah layer berbeda dan tidak menjadi bukti application-cache hit.
 
 ---
 
@@ -622,16 +726,28 @@ Tes dengan header `Accept-Encoding`:
 ```bash
 curl --silent --dump-header - --output /dev/null \
   --header 'Accept-Encoding: gzip' \
-  "$BASE/api/v1/industrial/assets/$ASSET_ID/telemetry" \
-  --header "Authorization: Bearer $INDUSTRIAL_TOKEN" | grep -i 'content-encoding'
+  "$BASE/api/v1/industrial/assets/$ASSET_ID/telemetry?tour=compression" \
+  --header "Authorization: Bearer $INDUSTRIAL_TOKEN" | \
+  tr -d '\r' | grep -i '^content-encoding: gzip$'
 
-curl --silent --dump-header - --output /dev/null \
+if curl --silent --dump-header - --output /dev/null \
   --header 'Accept-Encoding: gzip' \
   "$BASE/api/v1/banking/accounts/$ACCOUNT_ID" \
-  --header "Authorization: Bearer $BANKING_TOKEN" | grep -i 'content-encoding' || true
+  --header "Authorization: Bearer $BANKING_TOKEN" | \
+  tr -d '\r' | grep -qi '^content-encoding:'; then
+  echo 'Unexpected: banking response was compressed' >&2
+  exit 1
+else
+  echo 'Expected: banking response is not compressed'
+fi
 ```
 
-Industrial dapat mengembalikan `Content-Encoding: gzip`; banking sengaja tidak memiliki header compression.
+### Checkpoint — response compression
+
+- **Predict:** industrial telemetry memiliki `Content-Encoding: gzip`; banking tidak memiliki `Content-Encoding` walau client menawarkan gzip.
+- **Run:** jalankan kedua request di atas.
+- **Observe:** gunakan response header, bukan ukuran atau timing, sebagai bukti.
+- **Explain:** tunjukkan `UseResponseCompression()` dan exclusion path di `DomainResponseCompressionProvider`.
 
 ---
 
@@ -652,7 +768,29 @@ Perhatikan:
 - rejection memakai HTTP `429` dan header `Retry-After`;
 - setiap domain memiliki permit/window berbeda.
 
-Untuk mengulang pengujian, gunakan request command atau transfer dengan payload valid sampai response berubah menjadi `429`.
+Gunakan partition industrial yang fresh. Jika command baru saja diuji, tunggu 30 detik atau restart API terlebih dahulu.
+
+```bash
+for attempt in 1 2 3 4; do
+  curl --silent --output /dev/null --dump-header - \
+    --request POST \
+    "$BASE/api/v1/industrial/assets/$ASSET_ID/commands" \
+    --header "Authorization: Bearer $INDUSTRIAL_TOKEN" \
+    --header 'Content-Type: application/json' \
+    --data "{
+      \"idempotencyKey\": \"tour-$RUN_ID-$attempt\",
+      \"commandType\": \"start\"
+    }" \
+    --write-out "attempt=$attempt HTTP %{http_code}\n"
+done
+```
+
+### Checkpoint — rate limiting
+
+- **Predict:** tiga request pertama menghasilkan `202`; request keempat menghasilkan `429` dan `Retry-After: 5`.
+- **Run:** jalankan loop di atas satu kali pada partition fresh.
+- **Observe:** status dan header membuktikan limiter; tidak perlu mengandalkan timing.
+- **Explain:** tunjukkan `PermitLimit = 3`, fixed window 30 detik, partition username, queue limit nol, dan endpoint metadata.
 
 ---
 
@@ -690,45 +828,41 @@ Perhatikan bahwa login dan refresh anonymous, sedangkan revoke, me, dan workflow
 
 ## 13. Verifikasi akhir
 
-Jalankan pemeriksaan source:
+Jalankan gate repeatable yang digunakan repository:
 
 ```bash
-dotnet restore
-dotnet build --no-restore --force
-docker compose config --quiet
-dotnet tool run dotnet-ef migrations list
+./scripts/verify-learning-lab.sh
 ```
 
-Jalankan pemeriksaan runtime:
+Gate tersebut memverifikasi:
+
+- restore, warning-free build, Compose config, migration list, dan table pada lima schema;
+- OpenAPI/Swagger serta path/tag module;
+- authorization `401`, `403`, dan permitted `200`;
+- representative `400`, `404`, `409`, `422`, dan rate-limit `429`;
+- patient tetap tersedia setelah API restart;
+- correlation completion log;
+- application-cache miss, hit, dan invalidation;
+- gzip untuk industrial dan exclusion untuk banking;
+- tidak ada unhandled failure pada verification log window.
+
+Script membuat data sintetis dengan `RUN_ID` unique, me-restart API satu kali, menghentikan Compose setelah selesai, dan mempertahankan volume PostgreSQL. Ia tidak pernah menjalankan `docker compose down -v`.
+
+Buktikan repeatability dengan volume yang sama:
 
 ```bash
-docker compose up -d --build
-curl --fail --silent "$BASE/openapi/v1.json" > /dev/null
-curl --fail --silent "$BASE/swagger/index.html" > /dev/null
-docker compose logs --since 2m --no-color api
+./scripts/verify-learning-lab.sh
+./scripts/verify-learning-lab.sh
 ```
 
-Cari error tak terduga:
+Gunakan `KEEP_STACK=1 ./scripts/verify-learning-lab.sh` jika service harus tetap berjalan untuk inspeksi lanjutan.
 
-```bash
-if docker compose logs --since 2m --no-color api | grep -E 'Unhandled|fail: Microsoft.AspNetCore.Diagnostics|Exception'; then
-  exit 1
-fi
-```
+### Checkpoint — verification evidence
 
-Matikan stack setelah selesai:
-
-```bash
-docker compose down
-```
-
-Perintah tersebut menghapus container dan network, tetapi volume PostgreSQL tetap ada. Untuk reset database lokal secara sengaja:
-
-```bash
-docker compose down -v
-```
-
-Gunakan `down -v` hanya jika data synthetic lokal boleh dihapus.
+- **Predict:** run kedua tetap lulus walau row dari run pertama masih ada.
+- **Run:** jalankan gate dua kali.
+- **Observe:** kedua run memakai suffix berbeda dan tidak berhenti pada duplicate identifier.
+- **Explain:** bedakan static gate, host gate, HTTP gate, state gate, dan operational-observation gate. Output saat ini adalah evidence; checklist lama hanya historical record.
 
 ---
 

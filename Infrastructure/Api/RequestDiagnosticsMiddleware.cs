@@ -8,11 +8,17 @@ public sealed class RequestDiagnosticsMiddleware(
     RequestDelegate next,
     ILogger<RequestDiagnosticsMiddleware> logger)
 {
+    private const int MaxCorrelationIdLength = 128;
+
     public async Task InvokeAsync(HttpContext context)
     {
-        var correlationId = context.Request.Headers.TryGetValue("X-Correlation-Id", out var supplied)
-            && !string.IsNullOrWhiteSpace(supplied)
+        var suppliedCorrelationId = context.Request.Headers.TryGetValue(
+            "X-Correlation-Id",
+            out var supplied)
             ? supplied.ToString()
+            : string.Empty;
+        var correlationId = IsValidCorrelationId(suppliedCorrelationId)
+            ? suppliedCorrelationId
             : context.TraceIdentifier;
         context.Response.Headers["X-Correlation-Id"] = correlationId;
         var stopwatch = Stopwatch.StartNew();
@@ -23,9 +29,10 @@ public sealed class RequestDiagnosticsMiddleware(
             ["RequestPath"] = context.Request.Path.ToString(),
         });
         logger.LogInformation(
-            "Started {Method} {Path}",
+            "Started {Method} {Path} with correlation {CorrelationId}",
             context.Request.Method,
-            context.Request.Path);
+            context.Request.Path,
+            correlationId);
 
         try
         {
@@ -35,11 +42,21 @@ public sealed class RequestDiagnosticsMiddleware(
         {
             stopwatch.Stop();
             logger.LogInformation(
-                "Completed {Method} {Path} with {StatusCode} in {ElapsedMilliseconds} ms",
+                "Completed {Method} {Path} with {StatusCode} in {ElapsedMilliseconds} ms " +
+                "for correlation {CorrelationId}",
                 context.Request.Method,
                 context.Request.Path,
                 context.Response.StatusCode,
-                stopwatch.ElapsedMilliseconds);
+                stopwatch.ElapsedMilliseconds,
+                correlationId);
         }
+    }
+
+    private static bool IsValidCorrelationId(string value)
+    {
+        return value.Length is > 0 and <= MaxCorrelationIdLength &&
+            value.All(character =>
+                char.IsLetterOrDigit(character) ||
+                character is '-' or '_' or '.' or ':');
     }
 }
